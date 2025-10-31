@@ -1,0 +1,177 @@
+.TH SG_STREAM_CTL "8" "December 2023" "sg3_utils\-1.49" SG3_UTILS
+.SH NAME
+sg_stream_ctl \- send SCSI GET STREAM STATUS or STREAM CONTROL command
+.SH SYNOPSIS
+.B sg_stream_ctl
+[\fI\-\-brief\fR] [\fI\-\-close\fR] [\fI\-\-ctl=CTL\fR] [\fI\-\-get\fR]
+[\fI\-\-help\fR] [\fI\-\-hex\fR] [\fI\-\-id=SID\fR] [\fI\-\-inhex=FN\fR]
+[\fI\-\-json[=JO\fR]] [\fI\-\-js\-file=JFN\fR] [\fI\-\-maxlen=LEN\fR]
+[\fI\-\-open\fR] [\fI\-\-raw\fR] [\fI\-\-readonly\fR] [\fI\-\-verbose\fR]
+[\fI\-\-version\fR] \fIDEVICE\fR
+.SH DESCRIPTION
+.\" Add any additional description here
+Sends a SCSI GET STREAM STATUS or STREAM CONTROL command to the \fIDEVICE\fR.
+These commands, together with WRITE STREAM(16 and 32) and several fields in
+the Block Limits Extension VPD page [0xb7] support the streams concept.
+There is also the IO advice hints grouping mode page [0xa,0x4] . Amongst
+other things that mode page indicates whether a stream identifier do double
+duty as a group number found in most SCSI media access commands (e.g. READ,
+WRITE and VERIFY).
+.PP
+The stream commands were added in SBC\-4 draft 8 (September 2015). The stream
+commands were extended in SBC\-5 draft 5 (October 2023).
+.PP
+Both the GET STREAM STATUS and STREAM CONTROL commands expect data from the
+\fIDEVICE\fR (referred to as 'data\-in'). In the case of STREAM CONTROL
+only the 'open' (STR_CTL<\-\-0x1) actually needs the data\-in as it contains
+the "Assigned stream id" if the open was successful. The assigned stream
+id should be used by subsequent WRITE STREAM commands and ultimately
+by the STREAM CONTROL close (STR_CTL<\-\-0x2). Valid stream ids are between
+1 and 65535 inclusive.
+.SH OPTIONS
+Arguments to long options are mandatory for short options as well.
+.TP
+\fB\-b\fR, \fB\-\-brief\fR
+this option reduces the output of the GET STREAM STATUS command to just
+one number (in decimal) per line sent to stdout. Those numbers are the
+currently open stream ids. If an error occurs then \-1 is sent to stdout
+and error related messages are sent to stderr. The default is to print more
+words (and fields) from the GET STREAM STATUS response.
+.TP
+\fB\-c\fR, \fB\-\-close\fR
+selects the STREAM CONTROL command and sets STR_CTL<\-\-0x2 (i.e. 'close').
+The \fI\-\-id=SID\fR option should also be given because it defaults to 0
+which is not a valid stream id.
+.TP
+\fB\-C\fR, \fB\-\-ctl\fR=\fICTL\fR
+\fICTL\fR is the value placed in the STR_CTL field of the STREAM CONTROL
+command (cdb). It is a two bit field so has 4 variants: 0 and 3 are reserved;
+1 opens are new stream and 2 closes the given stream id. '\-\-ctl=1' is
+equivalent to '\-\-open' while '\-\-ctl=2' is equivalent to '\-\-close'.
+.TP
+\fB\-g\fR, \fB\-\-get\fR
+selects the GET STREAM STATUS command. If the \fI\-\-id=SID\fR option is also
+given then the response starts listing open stream ids from and including
+\fISID\fR. If the \fI\-\-id=SID\fR option is not given (or \fISID\fR is 0)
+then all open stream ids will be returned in the response (data\-in) as long
+as the allocation length is long enough. The allocation length defaults to
+248 bytes which can be overridden by the \fI\-\-maxlen=LEN\fR option.
+.IP
+This option usually does not need to be given as calling the GET STREAM
+STATUS command is the default action of this utility in the absence of any
+other "selecting" option.
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+output the usage message then exit.
+.TP
+\fB\-H\fR, \fB\-\-hex\fR
+.TP
+\fB\-H\fR, \fB\-\-hex\fR
+output response to this command in ASCII hex. Each line of 16 bytes is
+preceded by an address or index, starting at 0 and the address is also in
+hex. If given twice then an ASCII rendering of each byte is appended to the
+line output. If given three or more times then only the ASCII hex of each
+byte is output, 16 bytes per line (i.e. so no leading address nor trailing
+ASCII rendering). This latter form is suitable for placing in a file and
+being used with the \fI\-\-inhex=FN\fR option in a later invocation.
+.TP
+\fB\-i\fR, \fB\-\-id\fR=\fISID\fR
+\fISID\fR is a stream id, a value between 1 and 65535. It is used by STREAM
+CONTROL (close) to identify the stream to close. It is used by the GET
+STREAM STATUS command as the starting stream id (from and including); so
+stream ids that are less than \fISID\fR will not appear in the response.
+.TP
+\fB\-I\fR, \fB\-\-inhex\fR=\fIFN\fR
+where \fIFN\fR is a file name whose contents are assumed to be ASCII
+hexadecimal. If \fIDEVICE\fR is also given then \fIDEVICE\fR is ignored,
+a warning is issued and the utility continues, decoding the file named
+\fIFN\fR. See the "HEX, BINARY AND JSON FORMATS" section in the sg3_utils
+manpage for more information. If the \fI\-\-raw\fR option is also given then
+the contents of \fIFN\fR are treated as binary.
+.br
+\fIFN\fR may either contain data representing the response to a SCSI GET
+STREAM STATUS or a STREAM CONTROL command. This utility defaults to
+expecting the former. When \fIFN\fR contains data from a STREAM CONTROL
+command response then an additional option (other than this option) needs
+to be given: either \fI\-\-close\fR, \fI\-\-ctl=CTL\fR, or \fI\-\-open\fR.
+.TP
+\fB\-j\fR[=\fIJO\fR], \fB\-\-json\fR[=\fIJO\fR]
+output is in JSON format instead of plain text form. Note that arguments
+to the short and long form are themselves optional and if present start
+with "=" and no whitespace is permitted around that "=".
+.br
+See sg3_utils_json manpage or use '?' for \fIJO\fR to get a summary.
+.TP
+\fB\-J\fR, \fB\-\-js\-file\fR=\fIJFN\fR
+output is in JSON format and it is sent to a file named \fIJFN\fR. If that
+file exists then it is truncated. By default, the JSON output is sent to
+stdout.
+.br
+When this option is given, the \fI\-\-json[=JO]\fR option is implied and
+need not be given. The \fI\-\-json[=JO]\fR option may still be needed to
+set the \fIJO\fR parameter to non\-default values.
+.TP
+\fB\-m\fR, \fB\-\-maxlen\fR=\fILEN\fR
+\fILEN\fR is the maximum length the response can be. It becomes the
+ALLOCATION LENGTH field in both commands. The default (in the absence of
+this option) is 8 bytes for STREAM CONTROL and 248 bytes for GET STREAM
+STATUS.
+.TP
+\fB\-o\fR, \fB\-\-open\fR
+selects the STREAM CONTROL command and sets STR_CTL<\-\-0x1 (i.e. 'open').
+If the \fI\-\-id=SID\fR option is given then it is ignored. The user should
+observe the response as the "Assigned stream id" is printed on stdout if
+the open is successful, if not '\-1' is sent to stdout and error messages are
+sent to stderr. If the \fI\-\-brief\fR option is also given then the only
+thing sent to stdout is a number of the assigned stream id (1 to
+65535 inclusive) or '\-1' if there is an error.
+.TP
+\fB\-r\fR, \fB\-\-readonly\fR
+this option sets a 'read\-only' flag when the underlying operating system
+opens the given \fIDEVICE\fR. This may not work since operating systems can
+not easily determine whether a pass\-through command is a logical read or
+write operation on the media (or its metadata) so they take a risk averse
+stance and require read\-write type permissions on the \fIDEVICE\fR open
+irrespective of what is performed by the pass\-through.
+.TP
+\fB\-R\fR, \fB\-\-raw\fR
+output response in binary (to stdout) unless the \fI\-\-inhex=FN\fR option
+is also given. In that case the input file name (\fIFN\fR) is decoded as
+binary (and the output is _not_ in binary).
+.br
+To relax that final restriction this option can be given multiple times. If
+this option is given once or three times, \fIFN\fR is assumed to be binary.
+If this option is given two or three times, the (undecoded) output is in
+binary. These actions only apply when the \fI\-\-inhex=FN\fR option ia given.
+.TP
+\fB\-v\fR, \fB\-\-verbose\fR
+increase the level of verbosity, (i.e. debug output).
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+print the version string and then exit.
+.SH NOTES
+There are no special read commands for streams. This implies that "normal"
+READs (6, 10, 12, 16 or 32) can be used. Note that when a stream is closed,
+all resources associated with that stream id are removed, apart from the
+data in the written LBAs. To make sure the reading back data is not delayed
+too much by error recovery (in the presence of media errors) the user may
+set the RECOVERY TIME LIMIT field (RTL, units for non\-zero values:
+milliseconds) in the 'Read\-write error recovery' mode page. This can be done
+with the sdparm utility.
+.PP
+The SCSI WRITE STREAM (16 and 32) commands can be found in the sg_write_x
+utility in this package.
+.SH EXIT STATUS
+The exit status of sg_stream_ctl is 0 when it is successful. Otherwise see
+the sg3_utils(8) man page.
+.SH AUTHORS
+Written by Douglas Gilbert.
+.SH "REPORTING BUGS"
+Report bugs to <dgilbert at interlog dot com>.
+.SH COPYRIGHT
+Copyright \(co 2018\-2023 Douglas Gilbert
+.br
+This software is distributed under a BSD\-2\-Clause license. There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+.SH "SEE ALSO"
+.B sg_vpd,sg_write_x(sg3_utils); sdparm(sdparm)
