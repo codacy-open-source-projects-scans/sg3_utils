@@ -4,8 +4,17 @@
 # (c) 2006--2022 Hannes Reinecke, GNU GPL v2 or later
 # $Id: rescan-scsi-bus.sh,v 1.57 2012/03/31 14:08:48 garloff Exp $
 
-VERSION="20230413"
+VERSION="20260126"
 SCAN_WILD_CARD=4294967295
+
+# Only use standard PATH
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+UDEVADM=$(command -v udevadm) || {
+  echo "ERROR: udevadm not found" >&2
+  exit 1
+}
 
 CLEANUP=:
 trap 'eval "$CLEANUP"' 0
@@ -256,9 +265,10 @@ is_removable ()
 
   p=/sys/class/scsi_device/${host}:${channel}:${id}:${lun}/device/inquiry
   # Extract the second byte of the INQUIRY response and check bit 7 (mask 0x80).
-  b=$(hexdump -n1 -e '/1 "%02X"' "$p" 2>/dev/null)
+  b=$(od -j1 -N1 -An -t x1 "$p" 2>/dev/null)
   if [ -n "$b" ]; then
-    echo $(((0x$b & 0x80) != 0))
+    # Handle od leading space with parameter substitution.
+    echo $(((0x${b// /} & 0x80) != 0))
   else
     sg_inq "$sg_len_arg" /dev/$SGDEV 2>/dev/null | sed -n 's/^.*RMB=\([0-9]*\).*$/\1/p'
   fi
@@ -287,6 +297,13 @@ testonline ()
 
   # Handle in progress of becoming ready and unit attention
   while [ $RC = 2 -o $RC = 6 ] && [ $ctr -lt $timeout ] ; do
+    # Check immediately for removable devices; TEST UNIT READY obviously will
+    # fail for a removable device with no medium
+    RMB=$(is_removable)
+    print_and_scroll_back "$host:$channel:$id:$lun $SGDEV ($RMB) "
+    [ $RC = 2 ] && [ "$RMB" = "1" ] && break
+
+    # Check non-removable devices second
     if [ $RC = 2 ] && [ "$RMB" != "1" ] && sg_inq "$sg_len_arg" /dev/$SGDEV | grep -q -i "PQual=0" ; then
       echo -n "."
       let LN+=1
@@ -297,11 +314,6 @@ testonline ()
     let ctr+=1
     sg_turs "$sg_turs_opt" /dev/$SGDEV >/dev/null 2>&1
     RC=$?
-    # Check for removable device; TEST UNIT READY obviously will
-    # fail for a removable device with no medium
-    RMB=$(is_removable)
-    print_and_scroll_back "$host:$channel:$id:$lun $SGDEV ($RMB) "
-    [ $RC = 2 ] && [ "$RMB" = "1" ] && break
   done
   if [ $ctr != 0 ] ; then
     white_out
@@ -472,12 +484,12 @@ getluns()
 udevadm_settle()
 {
   local tmo=60
-  if [ -x /sbin/udevadm ] ; then
+  if [ -x "$UDEVADM" ] ; then
     print_and_scroll_back " Calling udevadm settle (can take a while) "
     # Loop for up to 60 seconds if sd devices still are settling..
     # This allows us to continue if udev events are stuck on multipaths in recovery mode
     while [ $tmo -gt 0 ] ; do
-      if ! /sbin/udevadm settle --timeout=1 | grep -E -q sd[a-z]+ ; then
+      if ! "$UDEVADM" settle --timeout=1 | grep -E -q sd[a-z]+ ; then
         break;
       fi
       let tmo=$tmo-1
@@ -838,7 +850,7 @@ findremapped()
   for hctl in $devs ; do
     if [ -d "/sys/class/scsi_device/$hctl/device/block" ] ; then
       sddev=$(ls "/sys/class/scsi_device/$hctl/device/block")
-      id_serial_old=$(udevadm info -q all -n "$sddev" | grep "ID_SERIAL=" | cut -d"=" -f2)
+      id_serial_old=$("$UDEVADM" info -q all -n "$sddev" | grep "ID_SERIAL=" | cut -d"=" -f2)
       [ -z "$id_serial_old" ] && id_serial_old="none"
       echo "$hctl $sddev $id_serial_old" >> $tmpfile
     fi
@@ -846,7 +858,7 @@ findremapped()
 
   # Trigger udev to update the info
   echo -n "Triggering udev to update device information... "
-  /sbin/udevadm trigger
+  "$UDEVADM" trigger
   udevadm_settle 2>&1 /dev/null
   echo "Done"
 
@@ -855,7 +867,7 @@ findremapped()
   # See what changed and reload the respective multipath device if applicable
   while read -r hctl sddev id_serial_old ; do
     remapped=0
-    id_serial=$(udevadm info -q all -n "$sddev" | grep "ID_SERIAL=" | cut -d"=" -f2)
+    id_serial=$("$UDEVADM" info -q all -n "$sddev" | grep "ID_SERIAL=" | cut -d"=" -f2)
     [ -z "$id_serial" ] && id_serial="none"
     if [ "$id_serial_old" != "$id_serial" ] ; then
       remapped=1
@@ -1350,9 +1362,9 @@ if [ -w /sys/module/scsi_mod/parameters/default_dev_flags ] && [ $scan_flags != 
     unset OLD_SCANFLAGS
   fi
 fi
-DMSETUP=$(which dmsetup)
+DMSETUP=$(version -s dmsetup)
 [ -z "$DMSETUP" ] && flush= && mp_enable=
-MULTIPATH=$(which multipath)
+MULTIPATH=$(version -s multipath)
 [ -z "$MULTIPATH" ] && flush= && mp_enable=
 
 echo -n "Scanning SCSI subsystem for new devices"
@@ -1431,7 +1443,7 @@ if [ -n "$mp_enable" ] && [ $rmvd_found -gt 0 ] ; then
     flushmpaths 1
   fi
   if [ $found -gt 0 ] ; then
-    /sbin/udevadm trigger --sysname-match=sd*
+    "$UDEVADM" trigger --sysname-match=sd*
     udevadm_settle
     if [ -x "$MULTIPATH" ] ; then
       echo "Trying to discover new multipath mappings for newly discovered devices... "
